@@ -75,7 +75,11 @@ class Asteroid {
   bool _isDirty = true;
 
   double _colorChangeTime = 0;
-  final _random = math.Random();
+  Color? _targetColor;
+  Color? _startColor; // Store the original color
+  double _colorTransitionProgress = 1.0;
+  static const double colorTransitionDuration = 2; // seconds
+  static const double colorChangeIntervalInSeconds = 2; // seconds
 
   // Use getter and setter for color to manage cache
   Color get color => _color;
@@ -118,13 +122,17 @@ class Asteroid {
   }
 
   void updateColor(double currentTime) {
-    const colorChangeIntervalInSeconds = 2.5;
     final phase = ((currentTime - _colorChangeTime) * 1 / colorChangeIntervalInSeconds).floor();
     if (phase > 0 && depth >= farDepthThreshold) {
-      final newColor = backColors[_random.nextInt(backColors.length)];
-      if (newColor != color) {
-        color = newColor; // This will trigger the setter and invalidate color cache
-        _colorChangeTime = currentTime;
+      if (_targetColor == null) {
+        // Only start new transition if not already transitioning
+        final newColor = backColors[math.Random().nextInt(backColors.length)];
+        if (newColor != color) {
+          _startColor = color; // Store the starting color
+          _targetColor = newColor;
+          _colorTransitionProgress = 0.0;
+          _colorChangeTime = currentTime;
+        }
       }
     }
   }
@@ -193,6 +201,19 @@ class Asteroid {
     }
 
     pulsePhase += pulseRate * deltaTime;
+
+    // Update color transition
+    if (_targetColor != null && _startColor != null) {
+      _colorTransitionProgress += deltaTime / colorTransitionDuration;
+      if (_colorTransitionProgress >= 1.0) {
+        color = _targetColor!;
+        _targetColor = null;
+        _startColor = null;
+        _colorTransitionProgress = 1.0;
+      } else {
+        color = Color.lerp(_startColor!, _targetColor!, _colorTransitionProgress)!;
+      }
+    }
   }
 
   List<Offset> getProjectedVertices({double gyroOffsetX = 0}) {
@@ -596,23 +617,21 @@ void main() {
     home: Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Builder(builder: (context) {
-          return Stack(
-            children: [
-              ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
-                child: const AsteroidField(
-                  asteroidCount: 50,
-                  maxDepth: farDepthThreshold,
-                ),
+        child: Stack(
+          children: [
+            ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
+              child: const AsteroidField(
+                asteroidCount: 90,
+                maxDepth: farDepthThreshold,
               ),
-              const AsteroidField(
-                asteroidCount: 20,
-                maxDepth: 0,
-              )
-            ],
-          );
-        }),
+            ),
+            const AsteroidField(
+              asteroidCount: 40,
+              maxDepth: 0,
+            )
+          ],
+        ),
       ),
     ),
   ));
