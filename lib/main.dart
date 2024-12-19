@@ -139,44 +139,54 @@ class Asteroid {
 
   static List<Vector3D> _generateVertices(double size) {
     final random = math.Random();
-    return _createIrregularTriangle(size, random);
+
+    // Randomly choose a shard type
+    final shardType = random.nextInt(4); // 0: acute, 1: obtuse, 2: needle, 3: wide
+
+    final zVariation = size * 0.2;
+    late double baseWidth;
+    late double height;
+    late double baseOffset;
+
+    switch (shardType) {
+      case 0: // Acute shard (pointy)
+        baseWidth = size * (0.3 + random.nextDouble() * 0.3);
+        height = size * (1.2 + random.nextDouble() * 0.4);
+        baseOffset = size * (random.nextDouble() - 0.5) * 0.3;
+        break;
+
+      case 1: // Obtuse shard (wide angle)
+        baseWidth = size * (1.0 + random.nextDouble() * 0.5); // Wider base
+        height = size * (0.6 + random.nextDouble() * 0.3); // Shorter height
+        baseOffset = size * (random.nextDouble() - 0.5) * 0.5;
+        break;
+
+      case 2: // Needle-like
+        baseWidth = size * (0.1 + random.nextDouble() * 0.2); // Very narrow
+        height = size * (1.5 + random.nextDouble() * 0.5); // Extra tall
+        baseOffset = size * (random.nextDouble() - 0.5) * 0.1;
+        break;
+
+      case 3: // Wide shard
+        baseWidth = size * (0.8 + random.nextDouble() * 0.4);
+        height = size * (0.8 + random.nextDouble() * 0.3);
+        baseOffset = size * (random.nextDouble() - 0.5) * 0.4;
+        break;
+    }
+
+    return [
+      Vector3D(baseOffset, 0, (random.nextDouble() - 0.5) * zVariation),
+      Vector3D(baseOffset + baseWidth, 0, (random.nextDouble() - 0.5) * zVariation),
+      Vector3D(
+          baseOffset + (baseWidth * (0.3 + random.nextDouble() * 0.4)), // Asymmetric tip position
+          -height,
+          (random.nextDouble() - 0.5) * zVariation * 1.5),
+    ];
   }
 
   List<Offset> getBaseVertices() {
     // Convert 3D vertices to 2D base positions
     return vertices.map((v) => Offset(v.x, v.y)).toList();
-  }
-
-  static List<Vector3D> _createIrregularTriangle(double size, math.Random random) {
-    final sides = List.generate(3, (_) => size * (0.8 + random.nextDouble() * 0.4));
-    final triangleType = random.nextInt(3);
-
-    List<double> angles;
-    switch (triangleType) {
-      case 0:
-        angles = [
-          math.pi * 0.3 + random.nextDouble() * 0.4,
-          math.pi * 0.3 + random.nextDouble() * 0.4,
-          math.pi * 0.4 + random.nextDouble() * 0.4
-        ];
-        break;
-      case 1:
-        angles = [
-          math.pi * 0.6 + random.nextDouble() * 0.3,
-          math.pi * 0.2 + random.nextDouble() * 0.3,
-          math.pi * 0.2 + random.nextDouble() * 0.3
-        ];
-        break;
-      default:
-        angles = List.generate(3, (_) => math.pi / 3 + (random.nextDouble() - 0.5) * 0.4);
-    }
-
-    return [
-      Vector3D(0, 0, 0),
-      Vector3D(
-          sides[0] * math.cos(angles[0]), sides[0] * math.sin(angles[0]), (random.nextDouble() - 0.5) * size * 0.2),
-      Vector3D(sides[1] * math.cos(0), sides[1] * math.sin(0), (random.nextDouble() - 0.5) * size * 0.2)
-    ];
   }
 
   void update(double deltaTime, Size bounds) {
