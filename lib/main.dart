@@ -1,30 +1,48 @@
+// models.dart
 import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
-class Vector2D {
-  double x, y;
-
-  Vector2D(this.x, this.y);
-
-  Vector2D operator +(Vector2D other) => Vector2D(x + other.x, y + other.y);
-
-  Vector2D operator *(double scalar) => Vector2D(x * scalar, y * scalar);
-
-  double get magnitude => math.sqrt(x * x + y * y);
-
-  Vector2D normalized() {
-    double mag = magnitude;
-    return mag > 0 ? Vector2D(x / mag, y / mag) : Vector2D(0, 0);
+extension RandomExtension on math.Random {
+  double nextGaussian() {
+    double u1 = 1.0 - nextDouble();
+    double u2 = 1.0 - nextDouble();
+    return math.sqrt(-2 * math.log(u1)) * math.cos(2 * math.pi * u2);
   }
 }
 
 class Vector3D {
-  double x, y, z;
+  final double x, y, z;
 
-  Vector3D(this.x, this.y, this.z);
+  const Vector3D(this.x, this.y, this.z);
+
+  Vector3D operator -(Vector3D other) => Vector3D(x - other.x, y - other.y, z - other.z);
+
+  Vector3D operator +(Vector3D other) => Vector3D(x + other.x, y + other.y, z + other.z);
+
+  Vector3D operator *(double scalar) => Vector3D(x * scalar, y * scalar, z * scalar);
+
+  double get magnitude => math.sqrt(x * x + y * y + z * z);
+
+  Vector3D normalized() {
+    final m = magnitude;
+    if (m == 0) return const Vector3D(0, 0, 0);
+    return Vector3D(x / m, y / m, z / m);
+  }
+
+  Vector3D cross(Vector3D other) {
+    return Vector3D(
+      y * other.z - z * other.y,
+      z * other.x - x * other.z,
+      x * other.y - y * other.x,
+    );
+  }
+
+  double dot(Vector3D other) {
+    return x * other.x + y * other.y + z * other.z;
+  }
 
   Vector3D rotateX(double angle) {
     final cos = math.cos(angle);
@@ -43,313 +61,100 @@ class Vector3D {
     final sin = math.sin(angle);
     return Vector3D(x * cos - y * sin, x * sin + y * cos, z);
   }
-
-  Vector3D rotate(Vector3D rotation) {
-    return rotateX(rotation.x).rotateY(rotation.y).rotateZ(rotation.z);
-  }
 }
 
 class Asteroid {
-  // Position and movement
-  Vector2D position;
-  Vector2D velocity;
-  Vector3D rotation = Vector3D(0, 0, 0);
-  Vector3D rotationVelocity;
-
-  // Physical properties
+  final Vector3D position;
+  Vector3D rotation;
+  final Vector3D rotationVelocity;
   final double size;
-  final double depth;
-  Color _color;
   final List<Vector3D> vertices;
-
-  // Visual properties
-  final double glowIntensity;
-  final double pulseRate;
-  double pulsePhase = 0;
-
-  // Caching
-  Path? _cachedPath;
-  List<Offset>? _cachedVertices;
-  Rect? _cachedBounds;
-  List<Color>? _cachedColors;
+  Color color;
   bool _isDirty = true;
-
-  double _colorChangeTime = 0;
-  Color? _targetColor;
-  Color? _startColor; // Store the original color
-  double _colorTransitionProgress = 1.0;
-  static const double colorTransitionDuration = 2; // seconds
-  static const double colorChangeIntervalInSeconds = 2; // seconds
-
-  // Use getter and setter for color to manage cache
-  Color get color => _color;
-
-  set color(Color newColor) {
-    if (_color != newColor) {
-      _color = newColor;
-      _cachedColors = null; // Invalidate color cache
-    }
-  }
+  List<Offset>? _cachedProjection;
 
   Asteroid({
     required this.position,
-    required this.velocity,
     required this.rotationVelocity,
     required this.size,
-    required this.depth,
-    required Color color,
-    required this.glowIntensity,
-    required this.pulseRate,
-  })  : _color = color,
-        vertices = _generateVertices(size),
-        _colorChangeTime = -math.Random().nextDouble() * 2;
-
-  List<Color> getColors() {
-    // Return cached colors if available
-    if (_cachedColors != null) return _cachedColors!;
-
-    // Create new colors list
-    _cachedColors = List<Color>.filled(3, color);
-    return _cachedColors!;
-  }
-
-  void invalidateCache() {
-    _isDirty = true;
-    _cachedPath = null;
-    _cachedVertices = null;
-    _cachedBounds = null;
-    // Don't invalidate _cachedColors here as they're managed separately
-  }
-
-  void updateColor(double currentTime) {
-    final phase = ((currentTime - _colorChangeTime) * 1 / colorChangeIntervalInSeconds).floor();
-    if (phase > 0 && depth >= farDepthThreshold) {
-      if (_targetColor == null) {
-        // Only start new transition if not already transitioning
-        final newColor = backColors[math.Random().nextInt(backColors.length)];
-        if (newColor != color) {
-          _startColor = color; // Store the starting color
-          _targetColor = newColor;
-          _colorTransitionProgress = 0.0;
-          _colorChangeTime = currentTime;
-        }
-      }
-    }
-  }
+    required this.color,
+  })  : rotation = const Vector3D(0, 0, 0),
+        vertices = _generateVertices(size);
 
   static List<Vector3D> _generateVertices(double size) {
     final random = math.Random();
-
-    // Randomly choose a shard type
-    final shardType = random.nextInt(4); // 0: acute, 1: obtuse, 2: needle, 3: wide
-
-    final zVariation = size * 0.2;
-    late double baseWidth;
-    late double height;
-    late double baseOffset;
-
-    switch (shardType) {
-      case 0: // Acute shard (pointy)
-        baseWidth = size * (0.3 + random.nextDouble() * 0.3);
-        height = size * (1.2 + random.nextDouble() * 0.4);
-        baseOffset = size * (random.nextDouble() - 0.5) * 0.3;
-        break;
-
-      case 1: // Obtuse shard (wide angle)
-        baseWidth = size * (1.0 + random.nextDouble() * 0.5); // Wider base
-        height = size * (0.6 + random.nextDouble() * 0.3); // Shorter height
-        baseOffset = size * (random.nextDouble() - 0.5) * 0.5;
-        break;
-
-      case 2: // Needle-like
-        baseWidth = size * (0.1 + random.nextDouble() * 0.2); // Very narrow
-        height = size * (1.5 + random.nextDouble() * 0.5); // Extra tall
-        baseOffset = size * (random.nextDouble() - 0.5) * 0.1;
-        break;
-
-      case 3: // Wide shard
-        baseWidth = size * (0.8 + random.nextDouble() * 0.4);
-        height = size * (0.8 + random.nextDouble() * 0.3);
-        baseOffset = size * (random.nextDouble() - 0.5) * 0.4;
-        break;
-    }
+    final baseWidth = size * (0.2 + random.nextDouble() * 0.3);
+    final height = size * (0.8 + random.nextDouble() * 1.2);
+    final baseOffset = size * (random.nextDouble() - 0.5) * 0.2;
+    final zVariation = size * 0.05;
 
     return [
       Vector3D(baseOffset, 0, (random.nextDouble() - 0.5) * zVariation),
       Vector3D(baseOffset + baseWidth, 0, (random.nextDouble() - 0.5) * zVariation),
       Vector3D(
-          baseOffset + (baseWidth * (0.3 + random.nextDouble() * 0.4)), // Asymmetric tip position
-          -height,
-          (random.nextDouble() - 0.5) * zVariation * 1.5),
+        baseOffset + (baseWidth * (0.4 + random.nextDouble() * 0.2)),
+        -height,
+        (random.nextDouble() - 0.5) * zVariation,
+      ),
     ];
   }
 
-  List<Offset> getBaseVertices() {
-    // Convert 3D vertices to 2D base positions
-    return vertices.map((v) => Offset(v.x, v.y)).toList();
-  }
-
-  void update(double deltaTime, Size bounds) {
-    invalidateCache();
-
-    position = position + velocity * deltaTime;
+  void update(double deltaTime) {
     rotation = Vector3D(
       rotation.x + rotationVelocity.x * deltaTime,
       rotation.y + rotationVelocity.y * deltaTime,
       rotation.z + rotationVelocity.z * deltaTime,
     );
-
-    final padding = size * 0.2;
-    if (position.x < (0 - padding) || position.x > (bounds.width + padding)) {
-      velocity.x = -velocity.x * 0.8;
-      position.x = position.x.clamp(0.0 - padding, bounds.width + padding);
-    }
-
-    if (position.y < (0 - padding) || position.y > (bounds.height + padding)) {
-      velocity.y = -velocity.y * 0.8;
-      position.y = position.y.clamp(0.0 - padding, bounds.height + padding);
-    }
-
-    pulsePhase += pulseRate * deltaTime;
-
-    // Update color transition
-    if (_targetColor != null && _startColor != null) {
-      _colorTransitionProgress += deltaTime / colorTransitionDuration;
-      if (_colorTransitionProgress >= 1.0) {
-        color = _targetColor!;
-        _targetColor = null;
-        _startColor = null;
-        _colorTransitionProgress = 1.0;
-      } else {
-        color = Color.lerp(_startColor!, _targetColor!, _colorTransitionProgress)!;
-      }
-    }
+    _isDirty = true;
   }
 
-  List<Offset> getProjectedVertices({double gyroOffsetX = 0}) {
-    if (!_isDirty && _cachedVertices != null) return _cachedVertices!;
+  List<Offset> project(Vector3D cameraPos, Vector3D forward, Vector3D right, Vector3D up, double fov) {
+    if (!_isDirty && _cachedProjection != null) return _cachedProjection!;
 
-    final horizontalOffset = gyroOffsetX * math.pow(1.1 - depth, 3);
+    final relativePos = position - cameraPos;
+    final depth = relativePos.dot(forward);
 
-    _cachedVertices = vertices.map((vertex) {
-      final rotated = vertex.rotate(rotation);
-      final scale = 1 + (rotated.z / 200);
+    if (depth <= 0) return const []; // Behind camera
+
+    final scale = fov / depth;
+    final screenX = relativePos.dot(right) * scale;
+    final screenY = relativePos.dot(up) * scale;
+
+    _cachedProjection = vertices.map((vertex) {
+      final rotated = vertex.rotateX(rotation.x).rotateY(rotation.y).rotateZ(rotation.z);
+      final vertexScale = scale * (1 + rotated.z / 200);
       return Offset(
-        position.x + rotated.x * scale + horizontalOffset,
-        position.y + rotated.y * scale,
+        screenX + rotated.x * vertexScale,
+        screenY + rotated.y * vertexScale,
       );
     }).toList();
 
-    return _cachedVertices!;
-  }
-
-  Path getPath({double gyroOffsetX = 0}) {
-    if (!_isDirty && _cachedPath != null) return _cachedPath!;
-
-    final vertices = getProjectedVertices(gyroOffsetX: gyroOffsetX);
-    _cachedPath = Path()..moveTo(vertices[0].dx, vertices[0].dy);
-
-    for (int i = 1; i < vertices.length; i++) {
-      _cachedPath!.lineTo(vertices[i].dx, vertices[i].dy);
-    }
-    _cachedPath!.close();
-
-    _isDirty = false;
-    return _cachedPath!;
-  }
-
-  Rect getBounds({double gyroOffsetX = 0}) {
-    if (!_isDirty && _cachedBounds != null) return _cachedBounds!;
-
-    final vertices = getProjectedVertices(gyroOffsetX: gyroOffsetX);
-    double minX = double.infinity;
-    double minY = double.infinity;
-    double maxX = double.negativeInfinity;
-    double maxY = double.negativeInfinity;
-
-    for (final vertex in vertices) {
-      minX = math.min(minX, vertex.dx);
-      minY = math.min(minY, vertex.dy);
-      maxX = math.max(maxX, vertex.dx);
-      maxY = math.max(maxY, vertex.dy);
-    }
-
-    _cachedBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
-    return _cachedBounds!;
+    return _cachedProjection!;
   }
 }
 
-// Color definitions
-final List<Color> colors = [
-  const Color(0xFFFFFAF0), // Antique white
-  const Color(0xFFFFFDD0), // Cream
-  const Color(0xFFFFFACD), // Lemon chiffon
-  const Color(0xFFF0F8FF), // Alice blue
-  const Color(0xFFF0FFFF), // Azure
-  const Color(0xFFE6E6FA), // Lavender
-  const Color(0xFFFFFAF0), // Floral white
-  const Color(0xFFFFE4E1), // Misty rose
-  const Color(0xFFF5F5F5), // White smoke
-  const Color(0xFFFDF5E6), // Old lace
-  const Color(0xFFFFFFF0), // Ivory
+// Color configurations
+const shardColors = [
+  Colors.white,
+  Color(0xFFF0F8FF), // Alice Blue
+  Color(0xFFFFFAFA), // Snow
+  Color(0xFFF0FFFF), // Azure
 ];
 
-final List<Color> backColors = [
-  Colors.red,
-  Colors.green,
-  Colors.blue,
-  Colors.yellow,
-  Colors.purple,
-  Colors.orange,
-  Colors.pink,
-  Colors.teal,
-  Colors.cyan,
-  Colors.lime,
-  Colors.indigo,
-  Colors.amber,
-  Colors.brown,
-  Colors.grey,
-  Colors.lightBlue,
-  Colors.lightGreen,
-  Colors.deepOrange,
+const accentColors = [
+  Color(0xFF4169E1), // Royal Blue
+  Color(0xFF9370DB), // Medium Purple
+  Color(0xFF3CB371), // Medium Sea Green
+  Color(0xFFFF6347), // Tomato
+  Color(0xFFFFD700), // Gold
 ];
-const double farDepthThreshold = 0.45;
-
-// Cached vertex data structure
-class VertexCache {
-  final List<Offset> positions;
-  final List<int> indices;
-  final List<Color> colors;
-
-  VertexCache({
-    required this.positions,
-    required this.indices,
-    required this.colors,
-  });
-}
-
-// Viewport for frustum culling
-class Viewport {
-  final Rect bounds;
-
-  Viewport({
-    required this.bounds,
-  });
-
-  bool isVisible(Rect objectBounds) {
-    // Simple 2D bounds intersection check
-    return bounds.overlaps(objectBounds);
-  }
-}
 
 class AsteroidField extends StatefulWidget {
   final int asteroidCount;
-  final double maxDepth;
 
   const AsteroidField({
     super.key,
-    this.asteroidCount = 20,
-    required this.maxDepth,
+    this.asteroidCount = 30,
   });
 
   @override
@@ -357,16 +162,26 @@ class AsteroidField extends StatefulWidget {
 }
 
 class AsteroidFieldState extends State<AsteroidField> with SingleTickerProviderStateMixin {
-  List<Asteroid> asteroidsNotifier = [];
-  final Map<int, VertexCache> vertexCache = {};
+  static const double hemisphereRadius = 400.0;
+  static const double maxTiltAngle = 60 * math.pi / 180;
+  static const double cameraSensitivity = 0.15;
+  static const double cameraInertia = 0.90;
+  static const double fov = 800.0;
+
+  List<Asteroid> asteroids = [];
   late final AnimationController _controller;
   double lastUpdateTime = 0;
-  final random = math.Random();
-
   double cameraX = 0;
   double cameraY = 0;
-  static const double cameraSensitivity = 30.0;
-  static const double cameraInertia = 0.95;
+  final random = math.Random();
+
+  static const double baseDistance = 1200.0; // Initial camera distance
+  static const double minDistance = 600.0; // Closest zoom
+  static const double maxDistance = 2000.0; // Furthest zoom
+
+  double _zoomLevel = 1.0;
+
+  double get cameraDistance => baseDistance * (1 / _zoomLevel);
 
   @override
   void initState() {
@@ -376,13 +191,14 @@ class AsteroidFieldState extends State<AsteroidField> with SingleTickerProviderS
       duration: const Duration(milliseconds: 16),
     )..addListener(_updateAsteroids);
     _controller.repeat();
+
     lastUpdateTime = DateTime.now().millisecondsSinceEpoch / 1000;
 
     gyroscopeEventStream().listen((GyroscopeEvent event) {
       if (mounted) {
         setState(() {
-          cameraX = (cameraX * cameraInertia) - (event.y * cameraSensitivity);
-          cameraY = (cameraY * cameraInertia) + (event.x * cameraSensitivity);
+          cameraX = (cameraX * cameraInertia - event.y * cameraSensitivity).clamp(-maxTiltAngle, maxTiltAngle);
+          cameraY = (cameraY * cameraInertia + event.x * cameraSensitivity).clamp(-maxTiltAngle, maxTiltAngle);
         });
       }
     });
@@ -395,62 +211,33 @@ class AsteroidFieldState extends State<AsteroidField> with SingleTickerProviderS
   }
 
   void _initAsteroids() {
-    final asteroids = <Asteroid>[];
-    final size = MediaQuery.of(context).size;
-    final spawnArea = Rect.fromLTWH(-size.width * 0.5, -size.height * 0.5, size.width * 2, size.height * 2);
+    asteroids = List.generate(widget.asteroidCount, (_) {
+      // Use gaussian distribution for more central concentration
+      final r = (random.nextGaussian() * 0.3).abs() * hemisphereRadius;
+      final phi = random.nextDouble() * 2 * math.pi;
+      final theta = (random.nextGaussian() * 0.3).abs() * math.pi / 2;
 
-    for (int i = 0; i < widget.asteroidCount; i++) {
-      asteroids.add(_createAsteroid(spawnArea));
-    }
-    asteroidsNotifier = asteroids;
-    _initializeVertexCache(asteroids);
-  }
+      final x = r * math.sin(theta) * math.cos(phi);
+      final y = r * math.sin(theta) * math.sin(phi);
+      final z = r * math.cos(theta);
 
-  void _initializeVertexCache(List<Asteroid> asteroids) {
-    vertexCache.clear();
-    for (var asteroid in asteroids) {
-      _cacheAsteroidVertices(asteroid);
-    }
-  }
+      final useAccentColor = random.nextDouble() < 0.2; // 20% chance for accent color
+      final color = (useAccentColor
+              ? accentColors[random.nextInt(accentColors.length)]
+              : shardColors[random.nextInt(shardColors.length)])
+          .withOpacity(0.9);
 
-  void _cacheAsteroidVertices(Asteroid asteroid) {
-    final basePositions = asteroid.getBaseVertices();
-    final indices = List<int>.generate(3, (i) => i);
-    final colors = List<Color>.filled(3, asteroid.color);
-
-    vertexCache[asteroid.hashCode] = VertexCache(
-      positions: basePositions,
-      indices: indices,
-      colors: colors,
-    );
-  }
-
-  Asteroid _createAsteroid(Rect spawnArea) {
-    final depth = (0.1 + random.nextDouble() * 0.9).clamp(0, widget.maxDepth).toDouble();
-    final baseSize = 10 + random.nextDouble() * 5;
-
-    return Asteroid(
-      position: Vector2D(
-        spawnArea.left + random.nextDouble() * spawnArea.width,
-        spawnArea.top + random.nextDouble() * spawnArea.height,
-      ),
-      velocity: Vector2D(
-        (random.nextDouble() - 0.5) * 20,
-        (random.nextDouble() - 0.5) * 20,
-      ),
-      rotationVelocity: Vector3D(
-        (random.nextDouble() - 0.5) * random.nextDouble() * 5,
-        (random.nextDouble() - 0.5) * random.nextDouble() * 5,
-        (random.nextDouble() - 0.5) * random.nextDouble() * 2,
-      ),
-      size: baseSize * (1.2 - depth * 0.7),
-      depth: depth,
-      color: depth < farDepthThreshold
-          ? colors[random.nextInt(colors.length)]
-          : backColors[random.nextInt(backColors.length)],
-      glowIntensity: 0.6 + random.nextDouble() * 0.4,
-      pulseRate: 0.5 + random.nextDouble() * 2,
-    );
+      return Asteroid(
+        position: Vector3D(x, y, z),
+        rotationVelocity: Vector3D(
+          (random.nextDouble() - 0.5) * 2,
+          (random.nextDouble() - 0.5) * 2,
+          (random.nextDouble() - 0.5) * 2,
+        ),
+        size: 10 + random.nextDouble() * 5,
+        color: color,
+      );
+    });
   }
 
   void _updateAsteroids() {
@@ -460,45 +247,39 @@ class AsteroidFieldState extends State<AsteroidField> with SingleTickerProviderS
     final deltaTime = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
 
-    final size = MediaQuery.of(context).size;
-
-    final asteroids = asteroidsNotifier;
     for (var asteroid in asteroids) {
-      asteroid.update(deltaTime, size);
-      asteroid.updateColor(currentTime);
+      asteroid.update(deltaTime);
     }
+
+    // setState(() {});
   }
 
   @override
   void dispose() {
     _controller.dispose();
-    vertexCache.clear();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final viewport = Viewport(
-      bounds: Rect.fromLTWH(
-        -size.width * 0.1,
-        -size.height * 0.1,
-        size.width * 1.2,
-        size.height * 1.2,
-      ),
-    );
-
-    return RepaintBoundary(
-      child: CustomPaint(
-        painter: AsteroidPainter(
-          asteroids: asteroidsNotifier,
-          vertexCache: vertexCache,
-          viewport: viewport,
-          canvasSize: size,
-          cameraX: cameraX,
-          cameraY: cameraY,
+    return GestureDetector(
+      onScaleUpdate: (ScaleUpdateDetails details) {
+        setState(() {
+          // Update zoom level with constraints
+          _zoomLevel = (_zoomLevel * details.scale).clamp(baseDistance / maxDistance, baseDistance / minDistance);
+        });
+      },
+      child: RepaintBoundary(
+        child: CustomPaint(
+          painter: AsteroidPainter(
+            asteroids: asteroids,
+            cameraX: cameraX,
+            cameraY: cameraY,
+            cameraDistance: cameraDistance,
+            fov: fov,
+          ),
+          size: Size.infinite,
         ),
-        size: Size.infinite,
       ),
     );
   }
@@ -506,143 +287,149 @@ class AsteroidFieldState extends State<AsteroidField> with SingleTickerProviderS
 
 class AsteroidPainter extends CustomPainter {
   final List<Asteroid> asteroids;
-  final Map<int, VertexCache> vertexCache;
-  final Viewport viewport;
-  final Size canvasSize;
   final double cameraX;
   final double cameraY;
+  final double cameraDistance;
+  final double fov;
+
+  static const double minDistance = 600.0;
+  static const double maxDistance = 2000.0;
 
   AsteroidPainter({
     required this.asteroids,
-    required this.vertexCache,
-    required this.viewport,
-    required this.canvasSize,
     required this.cameraX,
     required this.cameraY,
+    required this.cameraDistance,
+    required this.fov,
   });
 
-  List<Offset> transformVertices(List<Offset> baseVertices, Asteroid asteroid) {
-    final parallaxStrength = math.pow(1 - asteroid.depth, 2).toDouble();
-    final cameraOffset = Offset(
-      cameraX * parallaxStrength,
-      cameraY * parallaxStrength,
-    );
-
-    return baseVertices.map((vertex) {
-      // Apply rotation
-      final rotated = Vector3D(
-        vertex.dx,
-        vertex.dy,
-        0,
-      ).rotate(asteroid.rotation);
-
-      // Apply position, scale and camera offset
-      return Offset(
-        asteroid.position.x + rotated.x + cameraOffset.dx,
-        asteroid.position.y + rotated.y + cameraOffset.dy,
-      );
-    }).toList();
-  }
-
-  Offset applyCamera(Offset position, double depth) {
-    final parallaxStrength = math.pow(1 - depth, 2).toDouble();
-    return Offset(position.dx + (cameraX * parallaxStrength), position.dy + (cameraY * parallaxStrength));
-  }
-
-  bool isAsteroidVisible(Asteroid asteroid) {
-    final visibleBounds = Rect.fromLTWH(
-      -asteroid.size * 2,
-      -asteroid.size * 2,
-      canvasSize.width + asteroid.size * 4,
-      canvasSize.height + asteroid.size * 4,
-    );
-
-    final asteroidBounds = asteroid.getBounds();
-    final transformedBounds = Rect.fromPoints(
-      applyCamera(asteroidBounds.topLeft, asteroid.depth),
-      applyCamera(asteroidBounds.bottomRight, asteroid.depth),
-    );
-
-    return visibleBounds.overlaps(transformedBounds);
+  Vector3D getCameraPosition() {
+    return Vector3D(cameraDistance * math.sin(cameraX), cameraDistance * math.sin(cameraY),
+        cameraDistance * math.cos(cameraX) * math.cos(cameraY));
   }
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
+    canvas.translate(size.width / 2, size.height / 2);
 
-    final sortedAsteroids = [...asteroids]..sort((a, b) => b.depth.compareTo(a.depth));
+    final cameraPos = getCameraPosition();
+    final viewCenter = const Vector3D(0, 0, 0);
 
-    // Group asteroids by color for batching
-    final batchedVertices = <Color, List<Offset>>{};
-    final batchedIndices = <Color, List<int>>{};
-    final batchedColors = <Color, List<Color>>{};
+    final forward = (viewCenter - cameraPos).normalized();
+    final worldUp = const Vector3D(0, 1, 0);
+    final right = forward.cross(worldUp).normalized();
+    final up = right.cross(forward).normalized();
+
+    final sortedAsteroids = [...asteroids]..sort((a, b) {
+        final aPos = a.position - cameraPos;
+        final bPos = b.position - cameraPos;
+        return bPos.dot(forward).compareTo(aPos.dot(forward));
+      });
 
     for (var asteroid in sortedAsteroids) {
-      if (!isAsteroidVisible(asteroid) || asteroid.depth > 0.95) continue;
+      final vertices = asteroid.project(cameraPos, forward, right, up, fov);
+      if (vertices.isEmpty) continue;
 
-      final transformedVertices = asteroid.getProjectedVertices().map((v) => applyCamera(v, asteroid.depth)).toList();
+      final path = Path()..addPolygon(vertices, true);
 
-      final currentColor = asteroid.color;
+      // Calculate distance-based effects
+      final distanceToCamera = (asteroid.position - cameraPos).magnitude;
+      final closeness = (1 - (distanceToCamera - minDistance) / (maxDistance - minDistance)).clamp(0.0, 1.0);
 
-      // Add to batch
-      batchedVertices.putIfAbsent(currentColor, () => []).addAll(transformedVertices);
+      final glowSize = 2 + closeness * 4; // Larger glow when closer
+      final glowOpacity = 0.2 + closeness * 0.3; // More intense glow when closer
 
-      final indexOffset = (batchedVertices[currentColor]!.length - transformedVertices.length) ~/ 3 * 3;
-      batchedIndices.putIfAbsent(currentColor, () => []).addAll(
-            List<int>.generate(3, (i) => i + indexOffset),
-          );
+      // Enhanced outer glow
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = asteroid.color.withOpacity(glowOpacity)
+          ..style = PaintingStyle.fill
+          ..maskFilter = MaskFilter.blur(BlurStyle.outer, glowSize),
+      );
 
-      batchedColors.putIfAbsent(currentColor, () => []).addAll(asteroid.getColors());
+      // Main shape with distance-based opacity
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = asteroid.color.withOpacity(0.7 + closeness * 0.3)
+          ..style = PaintingStyle.fill,
+      );
+
+      // Enhanced inner highlight
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Colors.white.withOpacity(0.3 + closeness * 0.4)
+          ..style = PaintingStyle.fill
+          ..maskFilter = MaskFilter.blur(BlurStyle.inner, 1 + closeness),
+      );
+
+      // Add sharp edge highlight when very close
+      if (closeness > 0.7) {
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = Colors.white.withOpacity((closeness - 0.7) * 0.5)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.5,
+        );
+      }
+
+      // Add additional small highlight dots at vertices for close shards
+      if (closeness > 0.8) {
+        for (final vertex in vertices) {
+          canvas.drawCircle(
+              vertex,
+              0.5,
+              Paint()
+                ..color = Colors.white.withOpacity((closeness - 0.8) * 0.7)
+                ..style = PaintingStyle.fill);
+        }
+      }
     }
-
-    // Draw batched vertices
-    batchedVertices.forEach((color, vertices) {
-      if (vertices.isEmpty) return;
-
-      final verticesObject = Vertices(
-        VertexMode.triangles,
-        vertices,
-        indices: batchedIndices[color],
-        colors: batchedColors[color],
-      );
-
-      canvas.drawVertices(
-        verticesObject,
-        BlendMode.srcOver,
-        Paint(),
-      );
-    });
 
     canvas.restore();
   }
 
   @override
   bool shouldRepaint(AsteroidPainter oldDelegate) {
-    return true;
+    return oldDelegate.cameraX != cameraX ||
+        oldDelegate.cameraY != cameraY ||
+        oldDelegate.cameraDistance != cameraDistance;
   }
 }
 
 void main() {
-  runApp(MaterialApp(
-    home: Scaffold(
+  runApp(const MaterialApp(
+    home: _App(),
+  ));
+}
+
+class _App extends StatelessWidget {
+  const _App({
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Stack(
-          children: [
-            ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
-              child: const AsteroidField(
-                asteroidCount: 90,
-                maxDepth: farDepthThreshold,
+        child: GestureDetector(
+          onScaleStart: (_) {}, // Required for scale updates to work
+          child: Stack(
+            children: [
+              ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 1.5, sigmaY: 1.5),
+                child: const AsteroidField(asteroidCount: 40),
               ),
-            ),
-            const AsteroidField(
-              asteroidCount: 40,
-              maxDepth: 0,
-            )
-          ],
+              const AsteroidField(asteroidCount: 20),
+            ],
+          ),
         ),
       ),
-    ),
-  ));
+    );
+  }
 }
